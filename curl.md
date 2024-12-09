@@ -109,7 +109,7 @@ curl -X GET "http://localhost:8080/get?key=21030109"
 
 - 查询年级为 `2021` 的学生：
   ```bash
-  curl -X GET "http://localhost:8080/search?grand=2021"
+  curl -X GET "http://localhost:8080/search?grand=2023"
   ```
 
 **组合查询：**
