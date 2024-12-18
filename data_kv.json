@@ -1,4 +1,28 @@
 {
+    "16030110": {
+        "grand": 2021,
+        "class": "21计二",
+        "major": "通信工程",
+        "name": "张四四",
+        "course_count": 15,
+        "total_credits": 30
+    },
+    "18030109": {
+        "grand": 2021,
+        "class": "21计二",
+        "major": "通信工程",
+        "name": "张三",
+        "course_count": 15,
+        "total_credits": 30
+    },
+    "18030110": {
+        "grand": 2021,
+        "class": "21计二",
+        "major": "通信工程",
+        "name": "张四",
+        "course_count": 15,
+        "total_credits": 30
+    },
     "19010827": {
         "grand": 2022,
         "class": "22物联网一",
@@ -4581,7 +4605,7 @@
         "major": "软件工程(中英合作)",
         "name": "杨熙承",
         "course_count": 16,
-        "total_credits": 39.5
+        "total_credits": 42.5
     },
     "22030532": {
         "grand": 2022,

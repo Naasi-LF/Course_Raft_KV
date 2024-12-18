@@ -103,6 +103,8 @@ curl -X GET "http://localhost:8080/get?key=21030109"
 - 查询班级为 `21计二` 的学生：
   ```bash
   curl -X GET "http://localhost:8080/search?class=21计二"
+
+  curl -X GET "https://cathy.s7.tunnelfrp.com/search?class=23软件一"
   ```
 
 **查询某个年级的所有人：**

@@ -90,7 +90,7 @@ func main() {
 	// 启动 HTTP 服务
 	go startHTTPServer()
 	// 启动模拟故障的 Goroutine
-	go simulateFaults(kvServers)
+	// go simulateFaults(kvServers)
 	// 捕获中断信号
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
@@ -112,136 +112,114 @@ func main() {
 	log.Println("Server stopped.")
 }
 
+func cors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 设置允许的来源，* 表示允许所有来源
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		// 设置允许的请求方法
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		// 设置允许的请求头
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		// 处理预检请求（OPTIONS）
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // 启动 HTTP 服务
 func startHTTPServer() {
-	http.HandleFunc("/put", handlePut)
-	http.HandleFunc("/get", handleGet)
-	http.HandleFunc("/get_field", handleGetField) // 新增：单字段查询接口
-	http.HandleFunc("/search", handleSearch)      // 新增：条件查询接口
+	mux := http.NewServeMux()
+	mux.HandleFunc("/put", handlePut)
+	mux.HandleFunc("/get", handleGet)
+	mux.HandleFunc("/search", handleSearch)
+	mux.HandleFunc("/list_all", handleListAll)
 
+	// 使用跨域中间件
 	log.Println("HTTP server is running on :8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Fatal(http.ListenAndServe(":8080", cors(mux)))
 }
 
 // 处理 /put 请求
 func handlePut(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		http.Error(w, `{"error": "Invalid request method"}`, http.StatusMethodNotAllowed)
 		return
 	}
 
-	// 定义一个结构体匹配请求体的 JSON 格式
 	var request struct {
 		Key   string     `json:"key"`
-		Value kv.KVEntry `json:"value"` // 修改 Value 类型为 KVEntry
+		Value kv.KVEntry `json:"value"`
 	}
 
-	// 解析请求体
 	err := json.NewDecoder(r.Body).Decode(&request)
 	if err != nil {
-		http.Error(w, "Failed to parse request body", http.StatusBadRequest)
+		http.Error(w, `{"error": "Failed to parse request body"}`, http.StatusBadRequest)
 		return
 	}
 
-	// 调用 client.Put，传入 KVEntry 类型的 Value
 	client.Put(request.Key, request.Value)
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "Put operation successful for key: %s", request.Key)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": fmt.Sprintf("Put operation successful for key: %s", request.Key),
+	})
 }
 
 // 处理 /get 请求
 func handleGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		http.Error(w, `{"error": "Invalid request method"}`, http.StatusMethodNotAllowed)
 		return
 	}
 
 	key := r.URL.Query().Get("key")
 	if key == "" {
-		http.Error(w, "Key is required", http.StatusBadRequest)
+		http.Error(w, `{"error": "Key is required"}`, http.StatusBadRequest)
 		return
 	}
 
-	value := client.Get(key)
-	if value == "" {
-		http.Error(w, "Key not found", http.StatusNotFound)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "Value for key '%s': %s", key, value)
-}
-
-// 处理 /get_field 请求
-func handleGetField(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// 获取查询参数
-	key := r.URL.Query().Get("key")
-	field := r.URL.Query().Get("field")
-	if key == "" || field == "" {
-		http.Error(w, "Key and field are required", http.StatusBadRequest)
-		return
-	}
-
-	// 获取完整记录
 	jsonValue := client.Get(key)
 	if jsonValue == "" {
-		http.Error(w, "Key not found", http.StatusNotFound)
+		http.Error(w, `{"error": "Key not found"}`, http.StatusNotFound)
 		return
 	}
 
-	// 解析 JSON 数据
-	var record kv.KVEntry
+	// 将 JSON 字符串解析为结构化对象
+	var record map[string]interface{}
 	err := json.Unmarshal([]byte(jsonValue), &record)
 	if err != nil {
-		http.Error(w, "Failed to parse record", http.StatusInternalServerError)
+		http.Error(w, `{"error": "Failed to parse record"}`, http.StatusInternalServerError)
 		return
 	}
 
-	// 使用反射或者直接匹配字段
-	var result interface{}
-	switch field {
-	case "grand":
-		result = record.Grand
-	case "class":
-		result = record.Class
-	case "major":
-		result = record.Major
-	case "name":
-		result = record.Name
-	case "course_count":
-		result = record.CourseCount
-	case "total_credits":
-		result = record.TotalCredits
-	default:
-		http.Error(w, "Invalid field", http.StatusBadRequest)
-		return
-	}
+	// 添加 key 字段到记录中
+	record["id"] = key
 
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "%v", result)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(record)
 }
 
 // 处理 /search 请求
 func handleSearch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		http.Error(w, `{"error": "Invalid request method"}`, http.StatusMethodNotAllowed)
 		return
 	}
 
 	// 获取查询条件
 	query := r.URL.Query()
-	major := query.Get("major")
-	class := query.Get("class")
-	grand := query.Get("grand")
-	totalCredits := query.Get("total_credits") // total_credits 查询条件
+	name := query.Get("name")                  // 查询姓名
+	class := query.Get("class")                // 查询班级
+	major := query.Get("major")                // 查询专业
+	grand := query.Get("grand")                // 查询年级
+	courseCount := query.Get("course_count")   // 查询课程数
+	totalCredits := query.Get("total_credits") // 查询总学分
 
-	if major == "" && class == "" && grand == "" && totalCredits == "" {
-		http.Error(w, "At least one condition is required", http.StatusBadRequest)
+	if name == "" && class == "" && major == "" && grand == "" && courseCount == "" && totalCredits == "" {
+		http.Error(w, `{"error": "At least one condition is required"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -249,7 +227,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 	keys := client.GetAllKeys()
 
 	// 结果列表
-	results := []map[string]string{}
+	var results []map[string]interface{}
 
 	// 遍历每个键
 	for _, key := range keys {
@@ -259,7 +237,7 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 解析 JSON 数据
-		var record kv.KVEntry
+		var record map[string]interface{}
 		err := json.Unmarshal([]byte(jsonValue), &record)
 		if err != nil {
 			continue
@@ -267,33 +245,76 @@ func handleSearch(w http.ResponseWriter, r *http.Request) {
 
 		// 检查条件
 		matches := true
-		if major != "" && record.Major != major {
+		if name != "" && record["name"] != name {
 			matches = false
 		}
-		if class != "" && record.Class != class {
+		if class != "" && record["class"] != class {
 			matches = false
 		}
-		if grand != "" && strconv.Itoa(record.Grand) != grand {
+		if major != "" && record["major"] != major {
 			matches = false
+		}
+		if grand != "" && strconv.Itoa(int(record["grand"].(float64))) != grand {
+			matches = false
+		}
+		if courseCount != "" {
+			queryCourseCount, err := strconv.Atoi(courseCount)
+			if err != nil || int(record["course_count"].(float64)) != queryCourseCount {
+				matches = false
+			}
 		}
 		if totalCredits != "" {
-			// 将 total_credits 转换为浮点数进行比较
 			queryCredits, err := strconv.ParseFloat(totalCredits, 64)
-			if err != nil || record.TotalCredits != queryCredits {
+			if err != nil || record["total_credits"] != queryCredits {
 				matches = false
 			}
 		}
 
 		// 如果条件匹配，加入结果
 		if matches {
-			results = append(results, map[string]string{
-				"id":   key,
-				"name": record.Name,
-			})
+			record["id"] = key // 添加键作为 `id` 字段
+			results = append(results, record)
 		}
 	}
 
-	// 返回结果
+	// 设置响应头为 JSON 格式
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
+}
+
+// 处理 /list_all 请求
+func handleListAll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error": "Invalid request method"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 从客户端获取所有键
+	keys := client.GetAllKeys()
+
+	// 存储所有学生信息的列表
+	var results []map[string]interface{}
+
+	// 遍历每个键
+	for _, key := range keys {
+		jsonValue := client.Get(key)
+		if jsonValue == "" {
+			continue
+		}
+
+		// 将 JSON 数据解析为结构化对象
+		var record map[string]interface{}
+		err := json.Unmarshal([]byte(jsonValue), &record)
+		if err != nil {
+			continue
+		}
+
+		// 添加键到结果中
+		record["id"] = key
+		results = append(results, record)
+	}
+
+	// 设置响应头为 JSON 格式
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(results)
 }
@@ -322,13 +343,13 @@ func simulateFaults(kvServers []*kv.KVServer) {
 				default:
 					log.Printf("\033[31m💀💀💀💀[Fault] Server %d is down💀💀💀💀\033[0m", index)
 
-					time.Sleep(500 * time.Millisecond)
+					time.Sleep(100 * time.Millisecond)
 				}
 			}
 		}(serverIndex, done)
 
 		// 休眠 10 秒后恢复服务器
-		time.Sleep(5 * time.Second)
+		// time.Sleep(5 * time.Second)
 
 		log.Printf("🩺🩺🩺[Fault] Recovering server %d🩺🩺🩺", serverIndex)
 		persister := raft.MakePersister()
